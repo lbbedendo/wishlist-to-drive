@@ -93,6 +93,6 @@ output/
 
 - [Selenium](https://www.selenium.dev/) — Automação do navegador
 - [webdriver-manager](https://pypi.org/project/webdriver-manager/) — Instalação automática do ChromeDriver
-- python-dotenv — Variáveis de ambiente
-- Google Drive API — Upload automático
-- Chrome Headless — Execução sem janela
+- [python-dotenv](https://pypi.org/project/python-dotenv/) — Variáveis de ambiente
+- [Google Drive API](https://developers.google.com/workspace/drive/api/guides/about-sdk) — Upload automático
+- [Chrome Headless](https://developer.chrome.com/docs/chromium/headless) — Execução sem janela
