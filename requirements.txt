@@ -1,0 +1,12 @@
+# --- Scraping e automação ---
+selenium
+webdriver-manager
+
+# --- Manipulação de ambiente ---
+python-dotenv
+
+# --- APIs Google Drive ---
+google-api-python-client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2

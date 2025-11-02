@@ -1,0 +1,33 @@
+# --- Ambientes virtuais ---
+venv/
+.env
+.env.*
+
+# --- Arquivos sensíveis ---
+service_account.json
+
+# --- Arquivos de saída ---
+output/
+*.html
+*.json
+
+# --- Cache e build ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.tmp
+
+# --- Arquivos de sistema ---
+.DS_Store
+Thumbs.db
+
+# --- VSCode e IDEs ---
+.vscode/
+.idea/
+
+# --- Drivers temporários do Selenium ---
+chromedriver
+chromedriver.exe
+chromedriver.log
