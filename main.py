@@ -36,7 +36,13 @@ def configurar_driver():
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+
+    # A Amazon responde com uma página de erro ao user agent padrão do modo headless
+    # ("HeadlessChrome/..."). Usa o mesmo user agent, mas como o de um Chrome comum.
+    user_agent = driver.execute_script("return navigator.userAgent").replace("HeadlessChrome", "Chrome")
+    driver.execute_cdp_cmd("Network.setUserAgentOverride", {"userAgent": user_agent})
+    return driver
 
 
 def extrair_id_da_url(url):
