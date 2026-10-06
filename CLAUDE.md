@@ -28,7 +28,7 @@ Wishlists are listed in `wishlist.txt` at the repo root — a personal, git-igno
 Env vars are loaded from `.env` (see `.env.example`):
 
 - `GDRIVE_FOLDER_ID` — target Drive folder; if unset, upload is skipped with a warning.
-- `SERVICE_ACCOUNT_FILE` — path to the service-account JSON (`gdrive.py` falls back to `GOOGLE_APPLICATION_CREDENTIALS`). The Drive folder must be shared with the service account's email.
+- `SERVICE_ACCOUNT_FILE` — path to the service-account JSON. The Drive folder must be shared with the service account's email.
 
 ## Architecture
 

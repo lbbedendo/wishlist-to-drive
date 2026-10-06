@@ -10,10 +10,9 @@ SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 def autenticar_com_service_account_json():
     """
     Autentica no Google Drive usando o arquivo JSON da service account
-    definido via variável de ambiente SERVICE_ACCOUNT_FILE
-    (com fallback para GOOGLE_APPLICATION_CREDENTIALS).
+    definido via variável de ambiente SERVICE_ACCOUNT_FILE.
     """
-    credentials_path = os.getenv("SERVICE_ACCOUNT_FILE") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    credentials_path = os.getenv("SERVICE_ACCOUNT_FILE")
     if not credentials_path or not os.path.exists(credentials_path):
         raise FileNotFoundError(
             f"❌ O arquivo de credenciais da service account não foi encontrado ({credentials_path!r}). "
