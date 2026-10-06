@@ -12,8 +12,9 @@ Ideal para quem quer **organizar ou arquivar listas de leitura**, criar **dashbo
 - Gera automaticamente:
   - `amazon_wishlist_<ID>.html` — cópia da página completa  
   - `amazon_wishlist_<ID>.json` — dados estruturados dos livros  
-- Envia ambos os arquivos diretamente para o **Google Drive**
-- Suporte a **múltiplas wishlists** via variável de ambiente
+- Envia ambos os arquivos diretamente para o **Google Drive** (atualizando o arquivo existente com o mesmo nome, sem criar duplicatas)
+- Rola a página até o fim para carregar **todos os itens** de wishlists longas
+- Suporte a **múltiplas wishlists** via arquivo `wishlist.txt`
 
 ---
 
@@ -23,23 +24,34 @@ Ideal para quem quer **organizar ou arquivar listas de leitura**, criar **dashbo
 - Google Cloud Service Account com acesso ao Google Drive
 - Chrome e ChromeDriver (instalado automaticamente via `webdriver-manager`)
 
-Instale as dependências:
-
-```bash
-pip install -r requirements.txt
-```
 ## ⚙️ Configuração
 
 Crie um arquivo .env na raiz do projeto com as seguintes variáveis:
 
 ```
-AMAZON_LIST_URLS="https://www.amazon.com.br/hz/wishlist/ls/XXXXXXXXXXXX, https://www.amazon.com.br/hz/wishlist/ls/YYYYYYYYYYYY"
 GDRIVE_FOLDER_ID="SEU_FOLDER_ID_DO_GOOGLE_DRIVE"
 SERVICE_ACCOUNT_FILE="service_account.json"
 ```
 
-💡 AMAZON_LIST_URLS pode conter múltiplas URLs separadas por vírgula.
 💡 SERVICE_ACCOUNT_FILE deve apontar para o caminho do arquivo JSON da sua service account.
+
+### Wishlists
+
+As wishlists ficam no arquivo `wishlist.txt`, na raiz do projeto. Ele é pessoal e não é versionado; crie-o a partir do modelo:
+
+```bash
+cp wishlist.txt.template wishlist.txt
+```
+
+Uma wishlist por linha, com a URL completa ou apenas o ID. Linhas em branco são ignoradas e `#` inicia um comentário:
+
+```
+# Ficção
+https://www.amazon.com.br/hz/wishlist/ls/XXXXXXXXXXXX
+YYYYYYYYYYYY   # só o ID também funciona (usa amazon.com.br)
+```
+
+Linhas inválidas e wishlists duplicadas são ignoradas com um aviso no log.
 
 ## 🔐 Configurando a Service Account (Google Cloud)
 
@@ -59,7 +71,12 @@ SERVICE_ACCOUNT_FILE="service_account.json"
 wishlist-to-drive/
 ├── gdrive.py                # Autenticação e upload para o Google Drive
 ├── main.py                  # Script principal de scraping
+├── wishlists.py             # Leitura do arquivo wishlist.txt
+├── tests/                   # Testes unitários (pytest)
 ├── requirements.txt         # Dependências Python
+├── requirements-dev.txt     # Dependências de desenvolvimento (pytest)
+├── wishlist.txt.template    # Modelo da lista de wishlists
+├── wishlist.txt             # Suas wishlists (não versionado)
 ├── .env                     # Variáveis de ambiente
 ├── service_account.json     # Credenciais da service account
 └── output/                  # Arquivos HTML e JSON gerados
@@ -74,8 +91,15 @@ python main.py
 ```
 
 Durante a execução:
-- Cada wishlist será acessada e salva como HTML e JSON.
-- Os arquivos serão automaticamente enviados para o Google Drive.
+- Cada wishlist será acessada, rolada até o fim e salva como HTML e JSON.
+- Apenas os arquivos gerados nesta execução são enviados ao Google Drive; arquivos com o mesmo nome na pasta são atualizados.
+
+## 🧪 Testes
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
 
 ## 📁 Output
 

@@ -1,0 +1,8 @@
+# Wishlists da Amazon a serem coletadas.
+# Copie este arquivo para wishlist.txt (que não é versionado) e edite.
+#
+# Uma wishlist por linha: URL completa ou apenas o ID da lista.
+# Linhas em branco são ignoradas; '#' inicia um comentário (inclusive no fim da linha).
+
+https://www.amazon.com.br/hz/wishlist/ls/XXXXXXXXXXXX
+YYYYYYYYYYYY   # só o ID também funciona (usa amazon.com.br)

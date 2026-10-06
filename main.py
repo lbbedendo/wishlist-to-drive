@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 import pathlib
 import logging
 from selenium import webdriver
@@ -11,9 +12,14 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 from dotenv import load_dotenv
+from wishlists import ARQUIVO_WISHLISTS, carregar_urls_wishlists
 
 # Configurações iniciais
 DIRETORIO_OUTPUT = "output"
+SELETOR_LIVROS = "h2.a-size-base a[title]"
+MAX_SCROLLS = 50
+MAX_SCROLLS_SEM_PROGRESSO = 3
+PAUSA_SCROLL_SEGUNDOS = 2
 load_dotenv()
 
 # Logging configurado
@@ -53,36 +59,68 @@ def criar_diretorio_output():
 
 
 def salvar_html(driver, wishlist_id):
-    """Salva o HTML da página atual."""
+    """Salva o HTML da página atual e retorna o caminho do arquivo."""
     filename = f"{DIRETORIO_OUTPUT}/amazon_wishlist_{wishlist_id}.html"
     with open(filename, "w", encoding="utf-8") as f:
         f.write(driver.page_source)
     logging.info(f"📄 HTML salvo como: {filename}")
+    return filename
 
 
 def salvar_json(dados):
-    """Salva os dados extraídos em formato JSON."""
+    """Salva os dados extraídos em formato JSON e retorna o caminho do arquivo."""
     filename = f"{DIRETORIO_OUTPUT}/amazon_wishlist_{dados['wishlist_id']}.json"
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(dados, f, ensure_ascii=False, indent=2)
     logging.info(f"📄 JSON salvo como: {filename}")
+    return filename
 
 
 def esperar_carregar_livros(driver):
-    """Aguarda o carregamento dos livros e realiza scroll para garantir renderização completa."""
+    """Aguarda o carregamento dos primeiros livros da wishlist."""
     try:
         WebDriverWait(driver, 15).until(
-            EC.presence_of_all_elements_located((By.CSS_SELECTOR, "h2.a-size-base a[title]"))
+            EC.presence_of_all_elements_located((By.CSS_SELECTOR, SELETOR_LIVROS))
         )
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
     except TimeoutException:
         logging.warning("⚠️ Timeout esperando os livros carregarem.")
         return False
     return True
 
 
+def carregar_todos_os_livros(driver):
+    """
+    Rola a página até o fim repetidamente para que a Amazon carregue todas as
+    páginas da wishlist (scroll infinito). Para quando o marcador de fim de lista
+    aparece ou quando a quantidade de itens deixa de aumentar.
+    """
+    total_anterior = len(driver.find_elements(By.CSS_SELECTOR, SELETOR_LIVROS))
+    sem_progresso = 0
+
+    for _ in range(MAX_SCROLLS):
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(PAUSA_SCROLL_SEGUNDOS)
+
+        if driver.find_elements(By.ID, "endOfListMarker"):
+            break
+
+        total_atual = len(driver.find_elements(By.CSS_SELECTOR, SELETOR_LIVROS))
+        if total_atual > total_anterior:
+            total_anterior = total_atual
+            sem_progresso = 0
+        else:
+            sem_progresso += 1
+            if sem_progresso >= MAX_SCROLLS_SEM_PROGRESSO:
+                break
+    else:
+        logging.warning(f"⚠️ Limite de {MAX_SCROLLS} scrolls atingido; a lista pode estar incompleta.")
+
+    total = len(driver.find_elements(By.CSS_SELECTOR, SELETOR_LIVROS))
+    logging.info(f"🔄 {total} itens carregados após scroll.")
+
+
 def extrair_dados_da_wishlist(driver, url):
-    """Extrai dados da wishlist da Amazon."""
+    """Extrai dados da wishlist da Amazon. Retorna (dados, caminho_do_html)."""
     logging.info(f"📥 Acessando: {url}")
     driver.get(url)
 
@@ -90,23 +128,28 @@ def extrair_dados_da_wishlist(driver, url):
     criar_diretorio_output()
 
     if not esperar_carregar_livros(driver):
-        salvar_html(driver, wishlist_id)
+        arquivo_html = salvar_html(driver, wishlist_id)
         return {
             "wishlist_id": wishlist_id,
             "titulo": "Desconhecido",
             "livros": []
-        }
+        }, arquivo_html
 
-    salvar_html(driver, wishlist_id)
+    carregar_todos_os_livros(driver)
+    arquivo_html = salvar_html(driver, wishlist_id)
     titulo_wishlist = extrair_titulo_da_wishlist(driver)
 
     livros = []
-    elementos = driver.find_elements(By.CSS_SELECTOR, "h2.a-size-base a[title]")
+    urls_vistas = set()
+    elementos = driver.find_elements(By.CSS_SELECTOR, SELETOR_LIVROS)
 
     for link in elementos:
         try:
             titulo = link.get_attribute("title").strip()
             href = link.get_attribute("href").strip()
+            if href in urls_vistas:
+                continue
+            urls_vistas.add(href)
 
             # Busca o autor associado ao item
             container = link.find_element(By.XPATH, '../../..')
@@ -129,13 +172,11 @@ def extrair_dados_da_wishlist(driver, url):
         "wishlist_id": wishlist_id,
         "titulo": titulo_wishlist,
         "livros": livros
-    }
+    }, arquivo_html
 
 
-def enviar_arquivos_para_google_drive():
-    """Envia todos os arquivos de saída para o Google Drive."""
-    from os import listdir
-    from os.path import isfile, join
+def enviar_arquivos_para_google_drive(arquivos):
+    """Envia para o Google Drive os arquivos gerados nesta execução."""
     from gdrive import autenticar_com_service_account_json, enviar_para_drive
 
     gdrive_folder_id = os.getenv("GDRIVE_FOLDER_ID")
@@ -143,8 +184,6 @@ def enviar_arquivos_para_google_drive():
         logging.warning("⚠️ GDRIVE_FOLDER_ID não definido. Pulando upload para o Google Drive.")
         return
 
-    diretorio = f"./{DIRETORIO_OUTPUT}"
-    arquivos = [join(diretorio, f) for f in listdir(diretorio) if isfile(join(diretorio, f))]
     if not arquivos:
         logging.info("Nenhum arquivo encontrado para upload.")
         return
@@ -156,28 +195,39 @@ def enviar_arquivos_para_google_drive():
 
 
 def main():
-    """Função principal."""
-    urls_str = os.getenv("AMAZON_LIST_URLS")
-    if not urls_str:
-        logging.error("❌ Variável AMAZON_LIST_URLS não encontrada.")
-        return
+    """Função principal. Retorna a lista de arquivos gerados nesta execução."""
+    try:
+        urls = carregar_urls_wishlists(ARQUIVO_WISHLISTS)
+    except FileNotFoundError:
+        logging.error(
+            f"❌ Arquivo {ARQUIVO_WISHLISTS} não encontrado. "
+            f"Copie {ARQUIVO_WISHLISTS}.template para {ARQUIVO_WISHLISTS} e adicione suas wishlists."
+        )
+        return []
 
-    urls = [url.strip() for url in urls_str.split(",") if url.strip()]
+    if not urls:
+        logging.error(f"❌ Nenhuma wishlist encontrada em {ARQUIVO_WISHLISTS}.")
+        return []
+
+    logging.info(f"📋 {len(urls)} wishlists carregadas de {ARQUIVO_WISHLISTS}.")
     driver = configurar_driver()
+    arquivos_gerados = []
 
     for url in urls:
-        dados = extrair_dados_da_wishlist(driver, url)
+        dados, arquivo_html = extrair_dados_da_wishlist(driver, url)
+        arquivos_gerados.append(arquivo_html)
         if dados["livros"]:
             logging.info(f"📚 Livros encontrados em '{dados['titulo']}':")
             for livro in dados["livros"]:
                 logging.info(f" - {livro['titulo']} ({livro['autor']})")
         else:
             logging.warning(f"❌ Nenhum livro encontrado em '{dados['titulo']}'.")
-        salvar_json(dados)
+        arquivos_gerados.append(salvar_json(dados))
 
     driver.quit()
+    return arquivos_gerados
 
 
 if __name__ == "__main__":
-    main()
-    enviar_arquivos_para_google_drive()
+    arquivos = main()
+    enviar_arquivos_para_google_drive(arquivos)

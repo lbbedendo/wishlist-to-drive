@@ -9,14 +9,15 @@ SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
 def autenticar_com_service_account_json():
     """
-    Autentica no Google Drive usando o arquivo 'service_account.json'
-    definido via variável de ambiente GOOGLE_APPLICATION_CREDENTIALS.
+    Autentica no Google Drive usando o arquivo JSON da service account
+    definido via variável de ambiente SERVICE_ACCOUNT_FILE
+    (com fallback para GOOGLE_APPLICATION_CREDENTIALS).
     """
-    credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    credentials_path = os.getenv("SERVICE_ACCOUNT_FILE") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     if not credentials_path or not os.path.exists(credentials_path):
         raise FileNotFoundError(
-            "❌ O arquivo de credenciais 'service_account.json' não foi encontrado. "
-            "Defina a variável de ambiente GOOGLE_APPLICATION_CREDENTIALS com o caminho completo."
+            f"❌ O arquivo de credenciais da service account não foi encontrado ({credentials_path!r}). "
+            "Defina a variável de ambiente SERVICE_ACCOUNT_FILE com o caminho do JSON."
         )
 
     logging.info(f"🔐 Autenticando com service account: {credentials_path}")
@@ -27,9 +28,26 @@ def autenticar_com_service_account_json():
     return service
 
 
+def buscar_arquivo_existente(service, nome_arquivo, folder_id=None):
+    """Retorna o ID de um arquivo com o mesmo nome (na pasta, se informada), ou None."""
+    nome_escapado = nome_arquivo.replace("\\", "\\\\").replace("'", "\\'")
+    query = f"name = '{nome_escapado}' and trashed = false"
+    if folder_id:
+        query += f" and '{folder_id}' in parents"
+
+    resultado = (
+        service.files()
+        .list(q=query, fields="files(id)", pageSize=1, spaces="drive")
+        .execute()
+    )
+    arquivos = resultado.get("files", [])
+    return arquivos[0]["id"] if arquivos else None
+
+
 def enviar_para_drive(service, arquivo_local, folder_id=None):
     """
-    Envia um arquivo para o Google Drive.
+    Envia um arquivo para o Google Drive. Se já existir um arquivo com o mesmo
+    nome na pasta de destino, seu conteúdo é atualizado em vez de criar uma cópia.
 
     Args:
         service: objeto autenticado do Google Drive API
@@ -43,21 +61,30 @@ def enviar_para_drive(service, arquivo_local, folder_id=None):
     nome_arquivo = os.path.basename(arquivo_local)
     logging.info(f"☁️ Iniciando upload: {nome_arquivo}")
 
-    # Metadados do arquivo
-    file_metadata = {"name": nome_arquivo}
-    if folder_id:
-        file_metadata["parents"] = [folder_id]
-
     media = MediaFileUpload(arquivo_local, resumable=True)
 
     try:
-        arquivo = (
-            service.files()
-            .create(body=file_metadata, media_body=media, fields="id, name, webViewLink")
-            .execute()
-        )
+        arquivo_id = buscar_arquivo_existente(service, nome_arquivo, folder_id)
+        if arquivo_id:
+            arquivo = (
+                service.files()
+                .update(fileId=arquivo_id, media_body=media, fields="id, name, webViewLink")
+                .execute()
+            )
+            acao = "Atualizado"
+        else:
+            # Metadados do arquivo
+            file_metadata = {"name": nome_arquivo}
+            if folder_id:
+                file_metadata["parents"] = [folder_id]
+            arquivo = (
+                service.files()
+                .create(body=file_metadata, media_body=media, fields="id, name, webViewLink")
+                .execute()
+            )
+            acao = "Criado"
         logging.info(
-            f"✅ Upload concluído: {arquivo.get('name')} "
+            f"✅ {acao} no Drive: {arquivo.get('name')} "
             f"({arquivo.get('id')}) - Link: {arquivo.get('webViewLink')}"
         )
         return arquivo

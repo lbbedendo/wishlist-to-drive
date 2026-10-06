@@ -4,6 +4,9 @@ venv/
 .env.*
 !.env.example
 
+# --- Lista pessoal de wishlists (use wishlist.txt.template como base) ---
+wishlist.txt
+
 # --- Arquivos sensíveis ---
 service_account.json
 
