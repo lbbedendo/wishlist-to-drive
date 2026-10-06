@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import json
 import time
 import pathlib
@@ -176,26 +177,40 @@ def extrair_dados_da_wishlist(driver, url):
 
 
 def enviar_arquivos_para_google_drive(arquivos):
-    """Envia para o Google Drive os arquivos gerados nesta execução."""
+    """
+    Envia para o Google Drive os arquivos gerados nesta execução.
+    Retorna True se todos os envios tiverem sucesso (ou se o upload for pulado).
+    """
     from gdrive import autenticar_no_google_drive, enviar_para_drive
 
     gdrive_folder_id = os.getenv("GDRIVE_FOLDER_ID")
     if not gdrive_folder_id:
         logging.warning("⚠️ GDRIVE_FOLDER_ID não definido. Pulando upload para o Google Drive.")
-        return
+        return True
 
     if not arquivos:
         logging.info("Nenhum arquivo encontrado para upload.")
-        return
+        return True
 
     gdrive_service = autenticar_no_google_drive()
+    falhas = 0
     for arquivo in arquivos:
-        enviar_para_drive(gdrive_service, arquivo, gdrive_folder_id)
-        logging.info(f"☁️ Enviado para o Google Drive: {arquivo}")
+        if enviar_para_drive(gdrive_service, arquivo, gdrive_folder_id) is None:
+            falhas += 1
+
+    if falhas:
+        logging.error(f"❌ {falhas} de {len(arquivos)} arquivos não foram enviados ao Google Drive.")
+        return False
+    return True
 
 
 def main():
-    """Função principal. Retorna a lista de arquivos gerados nesta execução."""
+    """
+    Função principal. Retorna (arquivos_para_upload, sucesso).
+
+    Wishlists sem nenhum livro (timeout, CAPTCHA, lista privada) contam como falha
+    e seus arquivos não são enviados ao Drive, para não sobrescrever dados bons.
+    """
     try:
         urls = carregar_urls_wishlists(ARQUIVO_WISHLISTS)
     except FileNotFoundError:
@@ -203,31 +218,43 @@ def main():
             f"❌ Arquivo {ARQUIVO_WISHLISTS} não encontrado. "
             f"Copie {ARQUIVO_WISHLISTS}.template para {ARQUIVO_WISHLISTS} e adicione suas wishlists."
         )
-        return []
+        return [], False
 
     if not urls:
         logging.error(f"❌ Nenhuma wishlist encontrada em {ARQUIVO_WISHLISTS}.")
-        return []
+        return [], False
 
     logging.info(f"📋 {len(urls)} wishlists carregadas de {ARQUIVO_WISHLISTS}.")
     driver = configurar_driver()
-    arquivos_gerados = []
+    arquivos_para_upload = []
+    wishlists_com_falha = []
 
-    for url in urls:
-        dados, arquivo_html = extrair_dados_da_wishlist(driver, url)
-        arquivos_gerados.append(arquivo_html)
-        if dados["livros"]:
-            logging.info(f"📚 Livros encontrados em '{dados['titulo']}':")
-            for livro in dados["livros"]:
-                logging.info(f" - {livro['titulo']} ({livro['autor']})")
-        else:
-            logging.warning(f"❌ Nenhum livro encontrado em '{dados['titulo']}'.")
-        arquivos_gerados.append(salvar_json(dados))
+    try:
+        for url in urls:
+            dados, arquivo_html = extrair_dados_da_wishlist(driver, url)
+            arquivo_json = salvar_json(dados)
+            if dados["livros"]:
+                logging.info(f"📚 Livros encontrados em '{dados['titulo']}':")
+                for livro in dados["livros"]:
+                    logging.info(f" - {livro['titulo']} ({livro['autor']})")
+                arquivos_para_upload += [arquivo_html, arquivo_json]
+            else:
+                logging.error(
+                    f"❌ Nenhum livro encontrado em '{dados['titulo']}' ({dados['wishlist_id']}). "
+                    f"Veja {arquivo_html}. Arquivos não serão enviados ao Drive."
+                )
+                wishlists_com_falha.append(dados["wishlist_id"])
+    finally:
+        driver.quit()
 
-    driver.quit()
-    return arquivos_gerados
+    if wishlists_com_falha:
+        logging.error(
+            f"❌ {len(wishlists_com_falha)} de {len(urls)} wishlists falharam: {', '.join(wishlists_com_falha)}"
+        )
+    return arquivos_para_upload, not wishlists_com_falha
 
 
 if __name__ == "__main__":
-    arquivos = main()
-    enviar_arquivos_para_google_drive(arquivos)
+    arquivos, sucesso_scraping = main()
+    sucesso_upload = enviar_arquivos_para_google_drive(arquivos)
+    sys.exit(0 if sucesso_scraping and sucesso_upload else 1)

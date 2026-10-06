@@ -127,6 +127,7 @@ gcloud config set project "$PROJECT_ID"
    Durante a execução:
    - Cada wishlist é acessada, rolada até o fim e salva como HTML e JSON em `output/`.
    - Apenas os arquivos gerados nesta execução são enviados ao Google Drive; arquivos com o mesmo nome na pasta são atualizados.
+   - Wishlists sem nenhum livro (CAPTCHA, lista privada, timeout) são salvas em `output/` para análise, mas não são enviadas ao Drive, e o script termina com código de saída 1.
 
 7. (Opcional) Rode os testes:
 
@@ -229,6 +230,7 @@ O workflow [`.github/workflows/wishlist-to-drive.yml`](.github/workflows/wishlis
 - Em repositórios públicos, o GitHub desativa workflows agendados após **60 dias sem atividade** no repositório. Reative em **Actions → wishlist-to-drive → Enable workflow**.
 - Em repositórios públicos, **os logs das execuções são públicos** e incluem os títulos das wishlists e dos livros. As URLs ficam mascaradas por virem do secret `WISHLIST_TXT`.
 - A Amazon pode responder com CAPTCHA para IPs de datacenter (como os dos runners do GitHub). Nesse caso o log mostra "Nenhum livro encontrado".
+- A execução **falha (código de saída 1)** se alguma wishlist vier sem livros, se algum upload falhar ou se o `wishlist.txt` estiver vazio. Os arquivos das wishlists que falharam não são enviados ao Drive, para não sobrescrever a última versão boa. Ative as notificações de falha em **Settings → Notifications → Actions** no seu perfil do GitHub para ser avisado por e-mail.
 
 ### Removendo chaves antigas
 

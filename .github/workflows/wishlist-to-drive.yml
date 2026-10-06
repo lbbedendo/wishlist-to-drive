@@ -49,4 +49,9 @@ jobs:
       - name: Executar scraper e enviar ao Google Drive
         env:
           GDRIVE_FOLDER_ID: ${{ vars.GDRIVE_FOLDER_ID }}
-        run: python main.py
+        run: |
+          if [ -z "$GDRIVE_FOLDER_ID" ]; then
+            echo "::error::Variável GDRIVE_FOLDER_ID não configurada."
+            exit 1
+          fi
+          python main.py
