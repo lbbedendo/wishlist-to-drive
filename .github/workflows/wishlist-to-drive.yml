@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write # necessário para o Workload Identity Federation (token OIDC)
 
 concurrency:
   group: wishlist-to-drive
@@ -40,15 +39,21 @@ jobs:
           fi
           printf '%s\n' "$WISHLIST_TXT" > wishlist.txt
 
-      - name: Autenticar no Google Cloud (Workload Identity Federation)
-        uses: google-github-actions/auth@v3
-        with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - name: Criar arquivo do token OAuth do Google Drive a partir do secret
+        env:
+          GOOGLE_DRIVE_TOKEN: ${{ secrets.GOOGLE_DRIVE_TOKEN }}
+        run: |
+          if [ -z "$GOOGLE_DRIVE_TOKEN" ]; then
+            echo "::error::Secret GOOGLE_DRIVE_TOKEN não configurado."
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$GOOGLE_DRIVE_TOKEN" > "$RUNNER_TEMP/google_drive_token.json"
 
       - name: Executar scraper e enviar ao Google Drive
         env:
           GDRIVE_FOLDER_ID: ${{ vars.GDRIVE_FOLDER_ID }}
+          GOOGLE_DRIVE_TOKEN_FILE: ${{ runner.temp }}/google_drive_token.json
         run: |
           if [ -z "$GDRIVE_FOLDER_ID" ]; then
             echo "::error::Variável GDRIVE_FOLDER_ID não configurada."

@@ -9,6 +9,8 @@ wishlist.txt
 
 # --- Arquivos sensíveis ---
 service_account.json
+client_secret.json
+google_drive_token.json
 
 # --- Arquivos de saída ---
 output/

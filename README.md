@@ -15,7 +15,7 @@ Ideal para quem quer **organizar ou arquivar listas de leitura**, criar **dashbo
 - Envia ambos os arquivos diretamente para o **Google Drive** (atualizando o arquivo existente com o mesmo nome, sem criar duplicatas)
 - Rola a página até o fim para carregar **todos os itens** de wishlists longas
 - Suporte a **múltiplas wishlists** via arquivo `wishlist.txt`
-- Execução **agendada no GitHub Actions**, sem chaves de longa duração (Workload Identity Federation)
+- Execução **agendada no GitHub Actions**, com autenticação OAuth restrita aos arquivos criados pelo app (`drive.file`)
 
 ---
 
@@ -23,76 +23,58 @@ Ideal para quem quer **organizar ou arquivar listas de leitura**, criar **dashbo
 
 - Python **3.9+**
 - Chrome (o ChromeDriver é instalado automaticamente via `webdriver-manager`)
-- [Google Cloud CLI (`gcloud`)](https://cloud.google.com/sdk/docs/install)
-- Um projeto no Google Cloud e uma service account com acesso a uma pasta do Google Drive
+- Uma conta Google (o Gmail pessoal funciona) e um projeto no [Google Cloud Console](https://console.cloud.google.com/)
+- [GitHub CLI (`gh`)](https://cli.github.com/), para configurar a execução no GitHub Actions
 
-O projeto **não usa chaves JSON de service account** (credenciais de longa duração). A autenticação no Google Drive é feita com credenciais de curta duração:
+### Como funciona a autenticação
 
-| Onde roda | Como autentica |
-|---|---|
-| Localmente | Sua conta Google personifica a service account (`gcloud auth application-default login --impersonate-service-account`) |
-| GitHub Actions | Workload Identity Federation: o token OIDC do GitHub é trocado por um token temporário da service account |
+O script envia os arquivos **como você**, usando **OAuth 2.0** com o escopo `drive.file`:
 
-Em ambos os casos o código usa as [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials) (`google.auth.default`).
+1. **Uma única vez**, o script `autorizar_google_drive.py` abre o navegador, você autoriza o app e ele salva um **refresh token** em `google_drive_token.json`.
+2. **A cada execução** (local ou no GitHub Actions), o refresh token é trocado por um **access token de ~1 hora**, usado nas chamadas ao Drive.
+
+Os arquivos ocupam a cota do **seu** Drive. Por isso não se usa uma service account: service accounts não têm cota de armazenamento e o Google recusa uploads delas no "Meu Drive" de contas pessoais.
+
+Sobre o escopo `drive.file`:
+
+- O app só enxerga e altera **arquivos e pastas que ele mesmo criou**. O resto do seu Drive fica inacessível para ele.
+- Por isso a pasta de destino precisa ser **criada pelo app**: o `autorizar_google_drive.py` faz isso e imprime o ID dela. Uma pasta criada à mão no Drive não funciona (erro `appNotAuthorizedToFile`).
+- Depois de criada, você pode mover ou renomear a pasta no Drive à vontade.
+
+> ⚠️ O refresh token é uma **credencial de longa duração**: quem tiver o arquivo pode criar e alterar os arquivos deste app no seu Drive. Não versione `google_drive_token.json` nem `client_secret.json` (ambos estão no `.gitignore`). Para revogar o acesso a qualquer momento: [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 
 ---
 
-## 🔐 Passo 1 — Configurar o Google Cloud (comum aos dois modos)
+## 🔐 Passo 1 — Criar o OAuth client no Google Cloud (uma vez)
 
-Defina as variáveis abaixo no terminal; os comandos seguintes as utilizam:
+No [Google Cloud Console](https://console.cloud.google.com/), com o seu projeto selecionado:
 
-```bash
-PROJECT_ID="amazon-wishlist-scraper"        # ID do seu projeto no Google Cloud
-SA_NAME="wishlist-to-drive-sa"
-SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+1. **Ative a Google Drive API**: *APIs e serviços → Biblioteca → Google Drive API → Ativar*.
 
-gcloud auth login
-gcloud config set project "$PROJECT_ID"
-```
+2. **Configure a tela de consentimento** em *Google Auth Platform*:
+   - **Branding** (todos exigidos para publicar em produção):
+     - Nome do app: `wishlist-to-drive`
+     - E-mail de suporte e e-mail de contato do desenvolvedor
+     - Página inicial do aplicativo: URL do repositório (ex.: `https://github.com/<usuario>/wishlist-to-drive`)
+     - Link da Política de Privacidade: o [`PRIVACY.md`](PRIVACY.md) do repositório (ex.: `https://github.com/<usuario>/wishlist-to-drive/blob/main/PRIVACY.md`). Ele precisa estar no GitHub antes de salvar.
+     - Domínios autorizados: `github.com`
+     - Deixe **logotipo** e **Termos de Serviço** em branco: um logotipo exige verificação da marca pelo Google.
+   - **Público-alvo (Audience)**: tipo **Externo**. Em *Status de publicação*, clique em **Publicar app** para deixá-lo **Em produção**.
 
-1. Ative as APIs necessárias:
+     > ⚠️ Não deixe o app em **Teste**: nesse modo o Google expira o refresh token em **7 dias** e a execução agendada passa a falhar. Como `drive.file` é um escopo não sensível, publicar não exige verificação do Google.
 
-   ```bash
-   gcloud services enable \
-     drive.googleapis.com \
-     iam.googleapis.com \
-     iamcredentials.googleapis.com \
-     sts.googleapis.com
-   ```
+   - **Acesso a dados (Data access)**: *Adicionar ou remover escopos* → marque `https://www.googleapis.com/auth/drive.file` → *Atualizar* → *Salvar*.
 
-2. Crie a service account (**não crie chaves para ela**):
-
-   ```bash
-   gcloud iam service-accounts create "$SA_NAME" --display-name="wishlist-to-drive"
-   ```
-
-   A service account não precisa de nenhum papel (role) no projeto: o acesso ao Drive vem do compartilhamento da pasta.
-
-3. No Google Drive, crie uma pasta e copie o ID dela (o trecho após `/folders/` na URL). Exemplo: https://drive.google.com/drive/u/0/folders/<aqui-está-o-id-da-pasta>
-
-4. Compartilhe essa pasta com o e-mail da service account (`$SA_EMAIL`) com permissão de **Editor**.
+3. **Crie o OAuth client**: *Google Auth Platform → Clientes → Criar cliente*:
+   - Tipo de aplicativo: **App para computador (Desktop app)**
+   - Nome: `wishlist-to-drive`
+   - Clique em **Fazer download do JSON** e salve o arquivo como `client_secret.json` na raiz do projeto.
 
 ---
 
 ## ▶️ Passo 2a — Executando localmente
 
-1. Dê à sua conta Google permissão para personificar a service account:
-
-   ```bash
-   gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
-     --member="user:seu-email@gmail.com" \
-     --role="roles/iam.serviceAccountTokenCreator"
-   ```
-
-2. Gere as Application Default Credentials personificando a service account:
-
-   ```bash
-   gcloud auth application-default login --impersonate-service-account="$SA_EMAIL"
-   ```
-
-   O script passa a obter tokens temporários da service account a partir da sua sessão do `gcloud`. Nenhuma chave da service account é salva em disco.
-
-3. Crie o ambiente virtual e instale as dependências:
+1. Crie o ambiente virtual e instale as dependências:
 
    ```bash
    python3 -m venv venv
@@ -100,25 +82,35 @@ gcloud config set project "$PROJECT_ID"
    pip install -r requirements.txt
    ```
 
-4. Crie o arquivo `.env` a partir do modelo e preencha `GDRIVE_FOLDER_ID`:
+2. Autorize o acesso ao Google Drive (uma vez):
+
+   ```bash
+   python autorizar_google_drive.py
+   ```
+
+   - O navegador abre: entre na sua conta Google e autorize o acesso aos arquivos do app.
+   - Se aparecer o aviso *"O Google não verificou este app"*, clique em *Avançado → Acessar wishlist-to-drive*. O app é seu.
+   - O script salva o refresh token em `google_drive_token.json` (permissão `600`), cria a pasta `wishlist-to-drive` no seu Drive (ou reutiliza a existente) e imprime o ID dela.
+
+   Opções: `--client-secret <arquivo>`, `--token <arquivo>` e `--pasta <nome>`.
+
+3. Crie o arquivo `.env` a partir do modelo e preencha `GDRIVE_FOLDER_ID` com o ID impresso no passo anterior:
 
    ```bash
    cp .env.example .env
    ```
 
    ```
-   GDRIVE_FOLDER_ID="SEU_FOLDER_ID_DO_GOOGLE_DRIVE"
+   GDRIVE_FOLDER_ID="ID_IMPRESSO_PELO_AUTORIZAR_GOOGLE_DRIVE"
    ```
 
-   > Deixe `SERVICE_ACCOUNT_FILE` comentada/ausente. Se ela estiver definida, o script usa a chave JSON indicada em vez das Application Default Credentials.
-
-5. Crie o arquivo de wishlists a partir do modelo (veja [Wishlists](#-wishlists)):
+4. Crie o arquivo de wishlists a partir do modelo (veja [Wishlists](#-wishlists)):
 
    ```bash
    cp wishlist.txt.template wishlist.txt
    ```
 
-6. Execute:
+5. Execute:
 
    ```bash
    python main.py
@@ -129,7 +121,7 @@ gcloud config set project "$PROJECT_ID"
    - Apenas os arquivos gerados nesta execução são enviados ao Google Drive; arquivos com o mesmo nome na pasta são atualizados.
    - Wishlists sem nenhum livro (CAPTCHA, lista privada, timeout) são salvas em `output/` para análise, mas não são enviadas ao Drive, e o script termina com código de saída 1.
 
-7. (Opcional) Rode os testes:
+6. (Opcional) Rode os testes:
 
    ```bash
    pip install -r requirements-dev.txt
@@ -140,74 +132,27 @@ gcloud config set project "$PROJECT_ID"
 
 ## ⏰ Passo 2b — Executando periodicamente no GitHub Actions
 
-O workflow [`.github/workflows/wishlist-to-drive.yml`](.github/workflows/wishlist-to-drive.yml) roda o script em um agendamento cron e também pode ser disparado manualmente. A autenticação usa **Workload Identity Federation**, sem nenhuma chave armazenada no GitHub.
+O workflow [`.github/workflows/wishlist-to-drive.yml`](.github/workflows/wishlist-to-drive.yml) roda o script em um agendamento cron e também pode ser disparado manualmente. Ele recria o `wishlist.txt` e o arquivo do token a partir de secrets do repositório.
 
-1. Defina as variáveis adicionais (além das do Passo 1):
+1. Conclua o **Passo 2a** até o item 2: você precisa do `google_drive_token.json` e do ID da pasta.
 
-   ```bash
-   GITHUB_REPO="lbbedendo/wishlist-to-drive"   # <dono>/<repositório>
-   POOL_ID="github"
-   PROVIDER_ID="wishlist-to-drive"
-   PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
-   ```
-
-2. Crie o Workload Identity Pool:
-
-   ```bash
-   gcloud iam workload-identity-pools create "$POOL_ID" \
-     --location="global" \
-     --display-name="GitHub Actions"
-   ```
-
-3. Crie o provider OIDC do GitHub, aceitando **apenas** tokens deste repositório:
-
-   ```bash
-   gcloud iam workload-identity-pools providers create-oidc "$PROVIDER_ID" \
-     --location="global" \
-     --workload-identity-pool="$POOL_ID" \
-     --display-name="wishlist-to-drive" \
-     --issuer-uri="https://token.actions.githubusercontent.com" \
-     --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
-     --attribute-condition="assertion.repository == '${GITHUB_REPO}'"
-   ```
-
-4. Permita que o workflow deste repositório personifique a service account:
-
-   ```bash
-   gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
-     --role="roles/iam.workloadIdentityUser" \
-     --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/attribute.repository/${GITHUB_REPO}"
-   ```
-
-5. Obtenha o nome completo do provider (usado no próximo passo):
-
-   ```bash
-   gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
-     --location="global" \
-     --workload-identity-pool="$POOL_ID" \
-     --format="value(name)"
-   # projects/123456789/locations/global/workloadIdentityPools/github/providers/wishlist-to-drive
-   ```
-
-6. Configure as variáveis e o secret do repositório (em **Settings → Secrets and variables → Actions**, ou com o [GitHub CLI](https://cli.github.com/)):
+2. Configure os secrets e a variável do repositório (em **Settings → Secrets and variables → Actions**, ou com o `gh`):
 
    | Nome | Tipo | Valor |
    |---|---|---|
-   | `GCP_WORKLOAD_IDENTITY_PROVIDER` | Variable | Saída do passo 5 |
-   | `GCP_SERVICE_ACCOUNT` | Variable | E-mail da service account (`$SA_EMAIL`) |
-   | `GDRIVE_FOLDER_ID` | Variable | ID da pasta do Google Drive |
-   | `WISHLIST_TXT` | Secret | Conteúdo completo do seu `wishlist.txt` |
+   | `GOOGLE_DRIVE_TOKEN` | Secret | Conteúdo do `google_drive_token.json` |
+   | `WISHLIST_TXT` | Secret | Conteúdo do seu `wishlist.txt` |
+   | `GDRIVE_FOLDER_ID` | Variable | ID da pasta impresso pelo `autorizar_google_drive.py` |
 
    ```bash
-   gh variable set GCP_WORKLOAD_IDENTITY_PROVIDER --body "projects/123456789/locations/global/workloadIdentityPools/github/providers/wishlist-to-drive"
-   gh variable set GCP_SERVICE_ACCOUNT --body "$SA_EMAIL"
-   gh variable set GDRIVE_FOLDER_ID --body "SEU_FOLDER_ID_DO_GOOGLE_DRIVE"
+   gh secret set GOOGLE_DRIVE_TOKEN < google_drive_token.json
    gh secret set WISHLIST_TXT < wishlist.txt
+   gh variable set GDRIVE_FOLDER_ID --body "ID_DA_PASTA"
    ```
 
    > Sempre que editar o `wishlist.txt` local, rode `gh secret set WISHLIST_TXT < wishlist.txt` novamente.
 
-7. Ajuste o agendamento, se quiser, na expressão cron do workflow:
+3. Ajuste o agendamento, se quiser, na expressão cron do workflow:
 
    ```yaml
    on:
@@ -217,7 +162,7 @@ O workflow [`.github/workflows/wishlist-to-drive.yml`](.github/workflows/wishlis
 
    O cron do GitHub Actions é **sempre em UTC**.
 
-8. Faça o push para a branch padrão e teste disparando o workflow manualmente:
+4. Faça o push para a branch padrão e teste disparando o workflow manualmente:
 
    ```bash
    gh workflow run wishlist-to-drive.yml
@@ -228,19 +173,20 @@ O workflow [`.github/workflows/wishlist-to-drive.yml`](.github/workflows/wishlis
 
 - Execuções agendadas podem atrasar alguns minutos (ou, raramente, ser puladas) em horários de alta demanda.
 - Em repositórios públicos, o GitHub desativa workflows agendados após **60 dias sem atividade** no repositório. Reative em **Actions → wishlist-to-drive → Enable workflow**.
-- Em repositórios públicos, **os logs das execuções são públicos** e incluem os títulos das wishlists e dos livros. As URLs ficam mascaradas por virem do secret `WISHLIST_TXT`.
+- Em repositórios públicos, **os logs das execuções são públicos** e incluem os títulos das wishlists e dos livros. As URLs ficam mascaradas por virem do secret `WISHLIST_TXT`. Secrets não são expostos a pull requests de forks.
 - A Amazon pode responder com CAPTCHA para IPs de datacenter (como os dos runners do GitHub). Nesse caso o log mostra "Nenhum livro encontrado".
-- A execução **falha (código de saída 1)** se alguma wishlist vier sem livros, se algum upload falhar ou se o `wishlist.txt` estiver vazio. Os arquivos das wishlists que falharam não são enviados ao Drive, para não sobrescrever a última versão boa. Ative as notificações de falha em **Settings → Notifications → Actions** no seu perfil do GitHub para ser avisado por e-mail.
+- A execução **falha (código de saída 1)** se alguma wishlist vier sem livros, se algum upload falhar, se o `wishlist.txt` estiver vazio ou se o refresh token tiver sido revogado. Os arquivos das wishlists que falharam não são enviados ao Drive, para não sobrescrever a última versão boa. Ative as notificações de falha em **Settings → Notifications → Actions** no seu perfil do GitHub para ser avisado por e-mail.
 
-### Removendo chaves antigas
+### Renovando o refresh token
 
-Se você já criou chaves JSON para a service account, apague-as depois de validar os dois modos acima:
+O refresh token não expira com o tempo (com o app **Em produção**), mas é invalidado se você revogar o acesso, se ele ficar **6 meses sem uso** ou se você autorizar o mesmo client mais de 100 vezes. Se a execução falhar com *"O refresh token do Google Drive foi revogado ou expirou"*:
 
 ```bash
-gcloud iam service-accounts keys list --iam-account="$SA_EMAIL" --managed-by=user
-gcloud iam service-accounts keys delete KEY_ID --iam-account="$SA_EMAIL"
-rm service_account.json
+python autorizar_google_drive.py                         # reutiliza a pasta existente
+gh secret set GOOGLE_DRIVE_TOKEN < google_drive_token.json
 ```
+
+> Não apague o OAuth client nem crie outro: com `drive.file`, o acesso aos arquivos já enviados pertence ao client que os criou. Um client novo não enxerga a pasta antiga e criaria uma pasta e arquivos novos.
 
 ---
 
@@ -260,8 +206,9 @@ Linhas inválidas e wishlists duplicadas são ignoradas com um aviso no log.
 
 ## 🛠️ Solução de problemas
 
-- **`storageQuotaExceeded` / "Service Accounts do not have storage quota"**: service accounts não têm cota de armazenamento própria e o Google pode recusar a criação de arquivos por elas em pastas do "Meu Drive" de contas pessoais. Use uma pasta dentro de um **Drive compartilhado** (requer Google Workspace) e adicione a service account como membro.
-- **`DefaultCredentialsError`**: as Application Default Credentials não foram configuradas. Localmente, refaça o passo 2 da seção "Passo 2a — Executando localmente".
+- **`appNotAuthorizedToFile` / `File not found` na pasta**: o `GDRIVE_FOLDER_ID` aponta para uma pasta que não foi criada pelo app. Use o ID impresso pelo `autorizar_google_drive.py`.
+- **"O refresh token do Google Drive foi revogado ou expirou"**: veja [Renovando o refresh token](#renovando-o-refresh-token). Se acontecer a cada ~7 dias, o app está em modo **Teste**: publique-o (Passo 1, item 2).
+- **Arquivo de token não encontrado**: rode `python autorizar_google_drive.py` ou defina `GOOGLE_DRIVE_TOKEN_FILE` com o caminho correto.
 - **Nenhum livro encontrado**: abra o HTML salvo em `output/amazon_wishlist_<ID>.html` para ver o que a Amazon retornou (página de CAPTCHA, lista privada etc.).
 
 ## 🧠 Estrutura do Projeto
@@ -270,16 +217,21 @@ Linhas inválidas e wishlists duplicadas são ignoradas com um aviso no log.
 wishlist-to-drive/
 ├── .github/workflows/
 │   └── wishlist-to-drive.yml  # Execução agendada no GitHub Actions
+├── autorizar_google_drive.py  # Autorização OAuth única e criação da pasta no Drive
 ├── gdrive.py                  # Autenticação e upload para o Google Drive
 ├── main.py                    # Script principal de scraping
 ├── wishlists.py               # Leitura do arquivo wishlist.txt
 ├── tests/                     # Testes unitários (pytest)
 ├── requirements.txt           # Dependências Python
 ├── requirements-dev.txt       # Dependências de desenvolvimento (pytest)
+├── assets/logo.{png,svg}      # Logotipo (PNG 120x120 e fonte SVG)
+├── PRIVACY.md                 # Política de privacidade (exigida pela tela de consentimento OAuth)
 ├── wishlist.txt.template      # Modelo da lista de wishlists
 ├── wishlist.txt               # Suas wishlists (não versionado)
 ├── .env.example               # Modelo das variáveis de ambiente
 ├── .env                       # Variáveis de ambiente (não versionado)
+├── client_secret.json         # OAuth client baixado do Google Cloud (não versionado)
+├── google_drive_token.json    # Refresh token gerado pela autorização (não versionado)
 └── output/                    # Arquivos HTML e JSON gerados
 ```
 
@@ -301,4 +253,5 @@ output/
 - [webdriver-manager](https://pypi.org/project/webdriver-manager/) — Instalação automática do ChromeDriver
 - [python-dotenv](https://pypi.org/project/python-dotenv/) — Variáveis de ambiente
 - [Google Drive API](https://developers.google.com/workspace/drive/api/guides/about-sdk) — Upload automático
+- [OAuth 2.0 para apps instalados](https://developers.google.com/identity/protocols/oauth2/native-app) — Autorização do Google Drive
 - [Chrome Headless](https://developer.chrome.com/docs/chromium/headless) — Execução sem janela

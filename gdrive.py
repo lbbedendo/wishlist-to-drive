@@ -1,45 +1,60 @@
 import os
 import logging
-import google.auth
+from google.auth.exceptions import RefreshError
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from google.oauth2 import service_account
 
-# Escopo mínimo necessário para acesso ao Google Drive
+# Escopo mínimo necessário: acesso apenas aos arquivos criados por este app
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
-def autenticar_no_google_drive():
-    """
-    Autentica no Google Drive.
+ARQUIVO_TOKEN_PADRAO = "google_drive_token.json"
 
-    Se SERVICE_ACCOUNT_FILE estiver definida, usa o arquivo JSON da service account.
-    Caso contrário, usa as Application Default Credentials (ADC), que fornecem
-    credenciais de curta duração: Workload Identity Federation no GitHub Actions
-    ou `gcloud auth application-default login --impersonate-service-account` localmente.
+
+def caminho_do_token():
+    """Caminho do arquivo com o refresh token (GOOGLE_DRIVE_TOKEN_FILE ou o padrão)."""
+    return os.getenv("GOOGLE_DRIVE_TOKEN_FILE", ARQUIVO_TOKEN_PADRAO)
+
+
+def escapar_para_query(valor):
+    """Escapa um valor para uso entre aspas simples em uma query do Drive."""
+    return valor.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def carregar_credenciais(caminho=None):
     """
-    credentials_path = os.getenv("SERVICE_ACCOUNT_FILE")
-    if credentials_path:
-        if not os.path.exists(credentials_path):
-            raise FileNotFoundError(
-                f"❌ O arquivo de credenciais da service account não foi encontrado ({credentials_path!r}). "
-                "Corrija SERVICE_ACCOUNT_FILE ou remova-a para usar as Application Default Credentials."
-            )
-        logging.info(f"🔐 Autenticando com service account: {credentials_path}")
-        credentials = service_account.Credentials.from_service_account_file(
-            credentials_path, scopes=SCOPES
+    Carrega as credenciais OAuth do usuário (refresh token) e obtém um access token.
+    Falha cedo, com uma mensagem clara, se o token não existir ou tiver sido revogado.
+    """
+    caminho = caminho or caminho_do_token()
+    if not os.path.exists(caminho):
+        raise FileNotFoundError(
+            f"❌ Arquivo de token do Google Drive não encontrado ({caminho!r}). "
+            "Rode 'python autorizar_google_drive.py' para gerá-lo."
         )
-    else:
-        logging.info("🔐 Autenticando com Application Default Credentials")
-        credentials, _ = google.auth.default(scopes=SCOPES)
 
-    service = build("drive", "v3", credentials=credentials)
-    return service
+    credentials = Credentials.from_authorized_user_file(caminho, SCOPES)
+    try:
+        credentials.refresh(Request())
+    except RefreshError as e:
+        raise RuntimeError(
+            "❌ O refresh token do Google Drive foi revogado ou expirou. "
+            "Rode 'python autorizar_google_drive.py' novamente e atualize o secret GOOGLE_DRIVE_TOKEN."
+        ) from e
+    return credentials
+
+
+def autenticar_no_google_drive():
+    """Autentica no Google Drive como o usuário que autorizou o app (OAuth)."""
+    caminho = caminho_do_token()
+    logging.info(f"🔐 Autenticando no Google Drive com o token OAuth: {caminho}")
+    return build("drive", "v3", credentials=carregar_credenciais(caminho))
 
 
 def buscar_arquivo_existente(service, nome_arquivo, folder_id=None):
     """Retorna o ID de um arquivo com o mesmo nome (na pasta, se informada), ou None."""
-    nome_escapado = nome_arquivo.replace("\\", "\\\\").replace("'", "\\'")
-    query = f"name = '{nome_escapado}' and trashed = false"
+    query = f"name = '{escapar_para_query(nome_arquivo)}' and trashed = false"
     if folder_id:
         query += f" and '{folder_id}' in parents"
 
