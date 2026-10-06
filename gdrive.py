@@ -1,5 +1,6 @@
 import os
 import logging
+import google.auth
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
@@ -7,22 +8,30 @@ from google.oauth2 import service_account
 # Escopo mínimo necessário para acesso ao Google Drive
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
-def autenticar_com_service_account_json():
+def autenticar_no_google_drive():
     """
-    Autentica no Google Drive usando o arquivo JSON da service account
-    definido via variável de ambiente SERVICE_ACCOUNT_FILE.
+    Autentica no Google Drive.
+
+    Se SERVICE_ACCOUNT_FILE estiver definida, usa o arquivo JSON da service account.
+    Caso contrário, usa as Application Default Credentials (ADC), que fornecem
+    credenciais de curta duração: Workload Identity Federation no GitHub Actions
+    ou `gcloud auth application-default login --impersonate-service-account` localmente.
     """
     credentials_path = os.getenv("SERVICE_ACCOUNT_FILE")
-    if not credentials_path or not os.path.exists(credentials_path):
-        raise FileNotFoundError(
-            f"❌ O arquivo de credenciais da service account não foi encontrado ({credentials_path!r}). "
-            "Defina a variável de ambiente SERVICE_ACCOUNT_FILE com o caminho do JSON."
+    if credentials_path:
+        if not os.path.exists(credentials_path):
+            raise FileNotFoundError(
+                f"❌ O arquivo de credenciais da service account não foi encontrado ({credentials_path!r}). "
+                "Corrija SERVICE_ACCOUNT_FILE ou remova-a para usar as Application Default Credentials."
+            )
+        logging.info(f"🔐 Autenticando com service account: {credentials_path}")
+        credentials = service_account.Credentials.from_service_account_file(
+            credentials_path, scopes=SCOPES
         )
+    else:
+        logging.info("🔐 Autenticando com Application Default Credentials")
+        credentials, _ = google.auth.default(scopes=SCOPES)
 
-    logging.info(f"🔐 Autenticando com service account: {credentials_path}")
-    credentials = service_account.Credentials.from_service_account_file(
-        credentials_path, scopes=SCOPES
-    )
     service = build("drive", "v3", credentials=credentials)
     return service
 

@@ -28,13 +28,16 @@ Wishlists are listed in `wishlist.txt` at the repo root — a personal, git-igno
 Env vars are loaded from `.env` (see `.env.example`):
 
 - `GDRIVE_FOLDER_ID` — target Drive folder; if unset, upload is skipped with a warning.
-- `SERVICE_ACCOUNT_FILE` — path to the service-account JSON. The Drive folder must be shared with the service account's email.
+- `SERVICE_ACCOUNT_FILE` — optional, discouraged. If set, `gdrive.py` authenticates with that service-account JSON key; otherwise it uses Application Default Credentials (`google.auth.default`).
+
+The project must not rely on long-lived credentials. Locally, ADC comes from `gcloud auth application-default login --impersonate-service-account=<SA>`; in GitHub Actions, from Workload Identity Federation via `google-github-actions/auth`. Either way the Drive folder must be shared with the service account's email.
 
 ## Architecture
 
 - `main.py` — scraping pipeline. `main()` creates one headless Chrome driver, and for each URL `extrair_dados_da_wishlist()` loads the page, waits (15s) for items matching `SELETOR_LIVROS`, then `carregar_todos_os_livros()` scrolls repeatedly to trigger Amazon's infinite-scroll pagination until `#endOfListMarker` appears, the item count stops growing for `MAX_SCROLLS_SEM_PROGRESSO` scrolls, or `MAX_SCROLLS` is hit. It then saves the raw HTML and extracts each item's title/href (deduped by href) and the author from `span[id^='item-byline-']` three DOM levels up (`../../..`). On timeout it still writes HTML and an empty-`livros` JSON. `main()` returns the paths it wrote.
 - Upload: the `__main__` block passes those paths to `enviar_arquivos_para_google_drive()`, so only files from the current run are uploaded (not everything in `output/`).
-- `gdrive.py` — service-account auth (scope `drive.file`, so it can only see files this service account created) and `enviar_para_drive()`, which looks up a non-trashed file with the same name in the target folder and `update`s it, otherwise `create`s it. Output filenames are deterministic per wishlist ID, so reruns overwrite instead of duplicating.
+- `.github/workflows/wishlist-to-drive.yml` — cron-scheduled (UTC) + `workflow_dispatch` run on `ubuntu-latest` (Chrome preinstalled). Needs `id-token: write`; writes `wishlist.txt` from the `WISHLIST_TXT` secret and reads repo variables `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `GDRIVE_FOLDER_ID`. The repo is public, so run logs are public — don't log anything sensitive, and don't upload `output/` as an artifact.
+- `gdrive.py` — auth (key file or ADC, see above; scope `drive.file`, so it can only see files this service account created) and `enviar_para_drive()`, which looks up a non-trashed file with the same name in the target folder and `update`s it, otherwise `create`s it. Output filenames are deterministic per wishlist ID, so reruns overwrite instead of duplicating.
 
 JSON output shape: `{"wishlist_id": str, "titulo": str, "livros": [{"titulo", "autor", "url"}]}`.
 

@@ -177,7 +177,7 @@ def extrair_dados_da_wishlist(driver, url):
 
 def enviar_arquivos_para_google_drive(arquivos):
     """Envia para o Google Drive os arquivos gerados nesta execução."""
-    from gdrive import autenticar_com_service_account_json, enviar_para_drive
+    from gdrive import autenticar_no_google_drive, enviar_para_drive
 
     gdrive_folder_id = os.getenv("GDRIVE_FOLDER_ID")
     if not gdrive_folder_id:
@@ -188,7 +188,7 @@ def enviar_arquivos_para_google_drive(arquivos):
         logging.info("Nenhum arquivo encontrado para upload.")
         return
 
-    gdrive_service = autenticar_com_service_account_json()
+    gdrive_service = autenticar_no_google_drive()
     for arquivo in arquivos:
         enviar_para_drive(gdrive_service, arquivo, gdrive_folder_id)
         logging.info(f"☁️ Enviado para o Google Drive: {arquivo}")

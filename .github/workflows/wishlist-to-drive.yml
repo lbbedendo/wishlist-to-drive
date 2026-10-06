@@ -1,0 +1,52 @@
+name: wishlist-to-drive
+
+on:
+  schedule:
+    # Todos os dias às 09:00 UTC (06:00 em Brasília). Expressões cron do GitHub são sempre em UTC.
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # necessário para o Workload Identity Federation (token OIDC)
+
+concurrency:
+  group: wishlist-to-drive
+  cancel-in-progress: false
+
+jobs:
+  scrape-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Criar wishlist.txt a partir do secret
+        env:
+          WISHLIST_TXT: ${{ secrets.WISHLIST_TXT }}
+        run: |
+          if [ -z "$WISHLIST_TXT" ]; then
+            echo "::error::Secret WISHLIST_TXT não configurado."
+            exit 1
+          fi
+          printf '%s\n' "$WISHLIST_TXT" > wishlist.txt
+
+      - name: Autenticar no Google Cloud (Workload Identity Federation)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Executar scraper e enviar ao Google Drive
+        env:
+          GDRIVE_FOLDER_ID: ${{ vars.GDRIVE_FOLDER_ID }}
+        run: python main.py
