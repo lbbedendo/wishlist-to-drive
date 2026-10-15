@@ -85,7 +85,7 @@ No [Google Cloud Console](https://console.cloud.google.com/), com o seu projeto 
 2. Autorize o acesso ao Google Drive (uma vez):
 
    ```bash
-   python autorizar_google_drive.py
+   python src/autorizar_google_drive.py
    ```
 
    - O navegador abre: entre na sua conta Google e autorize o acesso aos arquivos do app.
@@ -110,10 +110,10 @@ No [Google Cloud Console](https://console.cloud.google.com/), com o seu projeto 
    cp wishlist.txt.template wishlist.txt
    ```
 
-5. Execute:
+5. Execute, a partir da raiz do projeto:
 
    ```bash
-   python main.py
+   python src/main.py
    ```
 
    Durante a execução:
@@ -182,7 +182,7 @@ O workflow [`.github/workflows/wishlist-to-drive.yml`](.github/workflows/wishlis
 O refresh token não expira com o tempo (com o app **Em produção**), mas é invalidado se você revogar o acesso, se ele ficar **6 meses sem uso** ou se você autorizar o mesmo client mais de 100 vezes. Se a execução falhar com *"O refresh token do Google Drive foi revogado ou expirou"*:
 
 ```bash
-python autorizar_google_drive.py                         # reutiliza a pasta existente
+python src/autorizar_google_drive.py                     # reutiliza a pasta existente
 gh secret set GOOGLE_DRIVE_TOKEN < google_drive_token.json
 ```
 
@@ -208,7 +208,7 @@ Linhas inválidas e wishlists duplicadas são ignoradas com um aviso no log.
 
 - **`appNotAuthorizedToFile` / `File not found` na pasta**: o `GDRIVE_FOLDER_ID` aponta para uma pasta que não foi criada pelo app. Use o ID impresso pelo `autorizar_google_drive.py`.
 - **"O refresh token do Google Drive foi revogado ou expirou"**: veja [Renovando o refresh token](#renovando-o-refresh-token). Se acontecer a cada ~7 dias, o app está em modo **Teste**: publique-o (Passo 1, item 2).
-- **Arquivo de token não encontrado**: rode `python autorizar_google_drive.py` ou defina `GOOGLE_DRIVE_TOKEN_FILE` com o caminho correto.
+- **Arquivo de token não encontrado**: rode `python src/autorizar_google_drive.py` ou defina `GOOGLE_DRIVE_TOKEN_FILE` com o caminho correto.
 - **Nenhum livro encontrado**: abra o HTML salvo em `output/amazon_wishlist_<ID>.html` para ver o que a Amazon retornou (página de CAPTCHA, lista privada etc.).
 
 ## 🧠 Estrutura do Projeto
@@ -217,10 +217,11 @@ Linhas inválidas e wishlists duplicadas são ignoradas com um aviso no log.
 wishlist-to-drive/
 ├── .github/workflows/
 │   └── wishlist-to-drive.yml  # Execução agendada no GitHub Actions
-├── autorizar_google_drive.py  # Autorização OAuth única e criação da pasta no Drive
-├── gdrive.py                  # Autenticação e upload para o Google Drive
-├── main.py                    # Script principal de scraping
-├── wishlists.py               # Leitura do arquivo wishlist.txt
+├── src/
+│   ├── autorizar_google_drive.py  # Autorização OAuth única e criação da pasta no Drive
+│   ├── gdrive.py                  # Autenticação e upload para o Google Drive
+│   ├── main.py                    # Script principal de scraping
+│   └── wishlists.py               # Leitura do arquivo wishlist.txt
 ├── tests/                     # Testes unitários (pytest)
 ├── requirements.txt           # Dependências Python
 ├── requirements-dev.txt       # Dependências de desenvolvimento (pytest)

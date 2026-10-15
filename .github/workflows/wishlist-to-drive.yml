@@ -59,4 +59,4 @@ jobs:
             echo "::error::Variável GDRIVE_FOLDER_ID não configurada."
             exit 1
           fi
-          python main.py
+          python src/main.py

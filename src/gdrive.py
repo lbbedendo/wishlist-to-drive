@@ -31,7 +31,7 @@ def carregar_credenciais(caminho=None):
     if not os.path.exists(caminho):
         raise FileNotFoundError(
             f"❌ Arquivo de token do Google Drive não encontrado ({caminho!r}). "
-            "Rode 'python autorizar_google_drive.py' para gerá-lo."
+            "Rode 'python src/autorizar_google_drive.py' para gerá-lo."
         )
 
     credentials = Credentials.from_authorized_user_file(caminho, SCOPES)
@@ -40,7 +40,7 @@ def carregar_credenciais(caminho=None):
     except RefreshError as e:
         raise RuntimeError(
             "❌ O refresh token do Google Drive foi revogado ou expirou. "
-            "Rode 'python autorizar_google_drive.py' novamente e atualize o secret GOOGLE_DRIVE_TOKEN."
+            "Rode 'python src/autorizar_google_drive.py' novamente e atualize o secret GOOGLE_DRIVE_TOKEN."
         ) from e
     return credentials
 

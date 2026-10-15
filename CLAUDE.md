@@ -12,15 +12,15 @@ Python + Selenium scraper that collects books (title, author, URL) from Amazon w
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 cp wishlist.txt.template wishlist.txt   # first time only; then edit it
-python autorizar_google_drive.py        # first time only (or when the token is revoked): OAuth consent + Drive folder
-python main.py        # scrape all wishlists, then upload this run's files to Drive
+python src/autorizar_google_drive.py        # first time only (or when the token is revoked): OAuth consent + Drive folder
+python src/main.py        # scrape all wishlists, then upload this run's files to Drive
 
 pip install -r requirements-dev.txt
-pytest                                   # all tests (pytest.ini sets pythonpath=. and testpaths=tests)
+pytest                                   # all tests (pytest.ini sets pythonpath=src and testpaths=tests)
 pytest tests/test_wishlists.py::test_remove_duplicatas_pelo_id   # single test
 ```
 
-There is no linter or build step. Chrome must be installed locally; ChromeDriver is fetched by `webdriver-manager` at runtime.
+All Python code except the tests lives in `src/` as flat modules (no package; they import each other by bare name, e.g. `from gdrive import ...`). Run the scripts from the repo root: `wishlist.txt`, `.env`, `client_secret.json`, `google_drive_token.json` and `output/` are resolved relative to the current directory. There is no linter or build step. Chrome must be installed locally; ChromeDriver is fetched by `webdriver-manager` at runtime.
 
 ## Configuration
 
@@ -31,7 +31,7 @@ Env vars are loaded from `.env` (see `.env.example`):
 - `GDRIVE_FOLDER_ID` — target Drive folder; if unset, upload is skipped with a warning. It must be a folder **created by this app** (see below).
 - `GOOGLE_DRIVE_TOKEN_FILE` — optional path to the OAuth token file (default `google_drive_token.json`).
 
-Drive auth is OAuth 2.0 as the user (installed-app flow), not a service account: service accounts have no Drive storage quota and get `403 storageQuotaExceeded` uploading to a personal "My Drive". `python autorizar_google_drive.py` runs once: it reads the Desktop OAuth client from `client_secret.json`, opens the browser for consent, writes an `authorized_user` JSON with the refresh token (mode 600), and gets-or-creates a `wishlist-to-drive` folder, printing its ID. The scope is `drive.file`, so the app can only see files/folders it created — a hand-made folder fails with `appNotAuthorizedToFile`, and access is tied to that OAuth client ID (a new client can't see old files). The refresh token is a long-lived credential (accepted trade-off); the consent screen must be "In production" or tokens expire in 7 days. `client_secret.json` and `google_drive_token.json` are git-ignored.
+Drive auth is OAuth 2.0 as the user (installed-app flow), not a service account: service accounts have no Drive storage quota and get `403 storageQuotaExceeded` uploading to a personal "My Drive". `python src/autorizar_google_drive.py` runs once: it reads the Desktop OAuth client from `client_secret.json`, opens the browser for consent, writes an `authorized_user` JSON with the refresh token (mode 600), and gets-or-creates a `wishlist-to-drive` folder, printing its ID. The scope is `drive.file`, so the app can only see files/folders it created — a hand-made folder fails with `appNotAuthorizedToFile`, and access is tied to that OAuth client ID (a new client can't see old files). The refresh token is a long-lived credential (accepted trade-off); the consent screen must be "In production" or tokens expire in 7 days. `client_secret.json` and `google_drive_token.json` are git-ignored.
 
 ## Architecture
 

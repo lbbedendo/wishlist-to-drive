@@ -6,8 +6,8 @@ refresh token em um arquivo e garante que exista uma pasta criada pelo próprio
 app no Drive (com drive.file o app só consegue gravar em pastas que ele criou).
 
 Uso:
-    python autorizar_google_drive.py
-    python autorizar_google_drive.py --client-secret client_secret.json --pasta wishlist-to-drive
+    python src/autorizar_google_drive.py
+    python src/autorizar_google_drive.py --client-secret client_secret.json --pasta wishlist-to-drive
 """
 import os
 import json
